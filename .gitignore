@@ -41,3 +41,4 @@ vignettes/*.pdf
 # stored data
 /data
 .DS_store
+*.tiff
