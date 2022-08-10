@@ -23,7 +23,7 @@ tx2gene <- tx2gene[!base::is.na(tx2gene$GENEID),]
 
 ###---
 sample_selected <- c(1, 3:5, 7:13, 15:19)
-my_threshold <- 1.5
+my_threshold <- 1.3
 ##----
 
 
@@ -149,15 +149,15 @@ de_comb <- dplyr::inner_join(x = de_aging, y = de_trf, by = 'EntrezID', suffix =
 de_comb <- dplyr::inner_join(x = tibble::rownames_to_column(base::as.data.frame(txi.kallisto.tsv$counts), var = 'EntrezID'), y = de_comb, by = 'EntrezID')
 
 
-## definition of de genes
+## definition of DE genes
 de_comb <- de_comb %>% dplyr::mutate(
   'DE_aging' = base::ifelse(
-    test = (pvalue_aging < .05 & (log2FoldChange_aging > base::log(my_threshold,2) | log2FoldChange_aging < -base::log(my_threshold,2))),
+    test = (pvalue_aging < .05 & (log2FoldChange_aging > base::log(my_threshold, 2) | log2FoldChange_aging < -base::log(my_threshold, 2))),
     yes = 'DE',
     no = 'notDE'
   ),
   'DE_trf' = base::ifelse(
-    test = (pvalue_trf < .05 & (log2FoldChange_trf > base::log(my_threshold,2) | log2FoldChange_trf < -base::log(my_threshold,2))),
+    test = (pvalue_trf < .05 & (log2FoldChange_trf > base::log(my_threshold, 2) | log2FoldChange_trf < -base::log(my_threshold, 2))),
     yes = 'DE',
     no = 'notDE'
   ),
@@ -165,12 +165,12 @@ de_comb <- de_comb %>% dplyr::mutate(
     test = (
       (DE_aging == 'DE' | DE_trf == 'DE') &
         (
-          (log2FoldChange_aging > base::log(my_threshold,2) & log2FoldChange_trf < -base::log(my_threshold,2)) |
-            (log2FoldChange_aging < -base::log(my_threshold,2) & log2FoldChange_trf > base::log(my_threshold,2))
+          (log2FoldChange_aging > base::log(my_threshold, 2) & log2FoldChange_trf < -base::log(my_threshold, 2)) |
+            (log2FoldChange_aging < -base::log(my_threshold, 2) & log2FoldChange_trf > base::log(my_threshold, 2))
         )
       ),
-    yes = 'Discordant',
-    no = 'notDiscordant'
+    yes = 'discordant',
+    no = 'not discordant'
   )
 ) 
 
@@ -201,17 +201,6 @@ ggplot2::ggsave(
 )
 
 
-## venn diagram 
-VennDiagram::venn.diagram(
-  x = base::list(
-    'aging effect' = de_comb %>% dplyr::filter(DE_aging == 'DE') %>% dplyr::pull(EntrezID),
-    'TRF effect' = de_comb %>% dplyr::filter(DE_trf == 'DE') %>% dplyr::pull(EntrezID),
-    'discordant genes' = de_comb %>% dplyr::filter(DE_discordant == 'Discordant') %>% dplyr::pull(EntrezID)
-  ), 
-  filename = 'de_venn.tiff'
-)
-
-
 ## save de gene info
 de_aging_genes <- AnnotationDbi::select(
   x = org.Mm.eg.db,
@@ -219,6 +208,9 @@ de_aging_genes <- AnnotationDbi::select(
   columns = c('ENTREZID', 'SYMBOL', 'GENENAME'),
   keytype = 'ENTREZID'
 )
+de_aging_genes <- de_aging_genes %>% 
+  dplyr::inner_join(x = ., y = de_comb, by = c('ENTREZID' = 'EntrezID')) %>%
+  dplyr::select(c(1:3, 'log2FoldChange_aging', 'pvalue_aging', 'log2FoldChange_trf', 'pvalue_trf'))
 readr::write_csv(x = de_aging_genes, file = './data/de_genes/de_aging_genes.csv')
 
 de_trf_genes <- AnnotationDbi::select(
@@ -227,18 +219,27 @@ de_trf_genes <- AnnotationDbi::select(
   columns = c('ENTREZID', 'SYMBOL', 'GENENAME'),
   keytype = 'ENTREZID'
 )
+de_trf_genes <- de_trf_genes %>% 
+  dplyr::inner_join(x = ., y = de_comb, by = c('ENTREZID' = 'EntrezID')) %>%
+  dplyr::select(c(1:3, 'log2FoldChange_aging', 'pvalue_aging', 'log2FoldChange_trf', 'pvalue_trf'))
 readr::write_csv(x = de_trf_genes, file = './data/de_genes/de_trf_genes.csv')
 
 de_discordant_genes <- AnnotationDbi::select(
   x = org.Mm.eg.db,
-  keys = de_comb  %>% dplyr::filter(DE_discordant == 'Discordant') %>% dplyr::pull(EntrezID),
+  keys = de_comb  %>% dplyr::filter(DE_discordant == 'discordant') %>% dplyr::pull(EntrezID),
   columns = c('ENTREZID', 'SYMBOL', 'GENENAME'),
   keytype = 'ENTREZID'
 )
+de_discordant_genes <- de_discordant_genes %>% 
+  dplyr::inner_join(x = ., y = de_comb, by = c('ENTREZID' = 'EntrezID')) %>%
+  dplyr::select(c(1:3, 'log2FoldChange_aging', 'pvalue_aging', 'log2FoldChange_trf', 'pvalue_trf'))
 readr::write_csv(x = de_discordant_genes, file = './data/de_genes/de_discordant_genes.csv')
 
 
 ## save de gene annotation
+my_ts_thr <- 1000
+my_is_thr <- 3
+
 de_aging_annot <- gprofiler2::gost(
   query =  de_comb %>% dplyr::filter(DE_aging == 'DE') %>% dplyr::pull(EntrezID),
   organism = 'mmusculus',
@@ -248,6 +249,12 @@ de_aging_annot <- gprofiler2::gost(
 )
 de_aging_annot <- de_aging_annot$result
 readr::write_csv(x = de_aging_annot, file = './data/de_genes/de_aging_annot.csv')
+de_aging_annot_filt <- de_aging_annot %>% 
+  dplyr::filter(
+    term_size < my_ts_thr,
+    intersection_size > my_is_thr
+  )
+readr::write_csv(x = de_aging_annot_filt, file = './data/de_genes/de_aging_annot_filt.csv')
 
 de_trf_annot <- gprofiler2::gost(
   query =  de_comb %>% dplyr::filter(DE_trf == 'DE') %>% dplyr::pull(EntrezID),
@@ -258,9 +265,15 @@ de_trf_annot <- gprofiler2::gost(
 )
 de_trf_annot <- de_trf_annot$result
 readr::write_csv(x = de_trf_annot, file = './data/de_genes/de_trf_annot.csv')
+de_trf_annot_filt <- de_trf_annot %>% 
+  dplyr::filter(
+    term_size < my_ts_thr,
+    intersection_size > my_is_thr
+  )
+readr::write_csv(x = de_trf_annot_filt, file = './data/de_genes/de_trf_annot_filt.csv')
 
 de_discordant_annot <- gprofiler2::gost(
-  query =  de_comb %>% dplyr::filter(DE_discordant == 'Discordant') %>% dplyr::pull(EntrezID),
+  query =  de_comb %>% dplyr::filter(DE_discordant == 'discordant') %>% dplyr::pull(EntrezID),
   organism = 'mmusculus',
   ordered_query = T,
   evcodes = T,
@@ -268,21 +281,49 @@ de_discordant_annot <- gprofiler2::gost(
 )
 de_discordant_annot <- de_discordant_annot$result
 readr::write_csv(x = de_discordant_annot, file = './data/de_genes/de_discordant_annot.csv')
+de_discordant_annot_filt <- de_discordant_annot %>% 
+  dplyr::filter(
+    term_size < my_ts_thr,
+    intersection_size > my_is_thr
+  )
+readr::write_csv(x = de_discordant_annot_filt, file = './data/de_genes/de_discordant_annot_filt.csv')
+
+
+## venn diagram 
+VennDiagram::venn.diagram(
+  x = base::list(
+    'aging effect' = de_comb %>% dplyr::filter(DE_aging == 'DE') %>% dplyr::pull(EntrezID),
+    'TRF effect' = de_comb %>% dplyr::filter(DE_trf == 'DE') %>% dplyr::pull(EntrezID),
+    'discordant genes' = de_comb %>% dplyr::filter(DE_discordant == 'discordant') %>% dplyr::pull(EntrezID)
+  ), 
+  filename = 'de_venn.tiff',
+  fill = c('#39B600', '#00A5FF', 'white'),
+  cat.fontface = 'bold'
+)
 
 
 ## discordant genes
+disc_gene_labels <- de_comb %>% dplyr::filter(log2FoldChange_aging < -3.5| log2FoldChange_aging < 3.5)
+
 sp_discordant <- de_comb %>%
   dplyr::filter(DE_aging == 'DE' | DE_trf == 'DE') %>%
   dplyr::mutate(
     DE_both = dplyr::case_when(
-      DE_aging == 'DE'    & DE_trf == 'notDE' ~ 'aging DE',
-      DE_aging == 'notDE' & DE_trf == 'DE'    ~ 'trf DE',
-      DE_aging == 'DE'    & DE_trf == 'DE'    ~ 'both DE'
+      DE_aging == 'DE'    & DE_trf == 'notDE' ~ 'DE: aging',
+      DE_aging == 'notDE' & DE_trf == 'DE'    ~ 'DE: TRF',
+      DE_aging == 'DE'    & DE_trf == 'DE'    ~ 'DE: aging + TRF'
     ),
     DE_discordant = forcats::fct_rev(base::as.factor(DE_discordant))
   ) %>%
   ggplot2::ggplot(data = ., mapping = ggplot2::aes(x = log2FoldChange_aging, y = log2FoldChange_trf, alpha = DE_discordant, color = DE_both)) +
-  ggplot2::geom_point() +
+  ggplot2::geom_point(size = .5) +
+  ggplot2::geom_text(
+    data = disc_gene_labels,
+    mapping = ggplot2::aes(x = log2FoldChange_aging, y = log2FoldChange_trf, label = EntrezID)
+  ) +
+  ggplot2::scale_color_manual(values = c(`DE: aging` = '#39B600', `DE: aging + TRF` = 'red', `DE: TRF` = '#00A5FF')) +
+  ggplot2::xlab('aging log2 FC') +
+  ggplot2::ylab('TRF log2 FC') +
   ggplot2::geom_hline(yintercept = 0) +
   ggplot2::geom_vline(xintercept = 0) +
   ggplot2::geom_hline(yintercept = c(base::log(my_threshold,2), -base::log(my_threshold,2)), color = 'grey') +
@@ -292,6 +333,7 @@ sp_discordant <- de_comb %>%
   ggplot2::theme(
     legend.title = ggplot2::element_blank()
   ) +
+  ggplot2::guides(colour = guide_legend(override.aes = list(size = 3)), alpha = 'none') +
   ggplot2::coord_fixed(ratio = 1)
 
 sp_discordant
@@ -442,31 +484,80 @@ gsea_res_mitochondrion_trf <- fgsea::fgsea(
 readr::write_csv(x = gsea_res_mitochondrion_aging, file = './data/de_genes_GSEA/gsea_res_mitochondrion_aging.csv')
 readr::write_csv(x = gsea_res_mitochondrion_trf, file = './data/de_genes_GSEA/gsea_res_mitochondrion_trf.csv')
 
-
-# to all gene sets
-mysets_names_all <- gsdb %>% dplyr::filter(gs_cat == 'C5') %>% dplyr::pull(gs_name) %>% base::unique()
-mysets_all <- purrr::map(
-  .x = mysets_names_all,
-  .f = function(x = mysets_names_all){gsdb %>% dplyr::filter(gs_name == x) %>% dplyr::pull(entrez_gene)}
+# aging
+mysets_names_aging <- c(
+  'DEMAGALHAES_AGING_DN',
+  'DEMAGALHAES_AGING_UP',
+  'GOBP_AGING',
+  'GOBP_CELL_AGING',
+  'GOBP_MULTICELLULAR_ORGANISM_AGING',
+  'GOBP_NEGATIVE_REGULATION_OF_CELL_AGING',
+  'GOBP_POSITIVE_REGULATION_OF_CELL_AGING',
+  'GOBP_REGULATION_OF_CELL_AGING',
+  'HP_MORTALITY_AGING',
+  'JIANG_AGING_CEREBRAL_CORTEX_DN',
+  'JIANG_AGING_CEREBRAL_CORTEX_UP',
+  'JIANG_AGING_HYPOTHALAMUS_DN',
+  'JIANG_AGING_HYPOTHALAMUS_UP',
+  'JU_AGING_TERC_TARGETS_UP',
+  'KAYO_AGING_MUSCLE_DN',
+  'KAYO_AGING_MUSCLE_UP',
+  'KYNG_NORMAL_AGING_DN',
+  'KYNG_NORMAL_AGING_UP',
+  'KYNG_WERNER_SYNDROM_AND_NORMAL_AGING_DN',
+  'KYNG_WERNER_SYNDROM_AND_NORMAL_AGING_UP',
+  'LEE_AGING_CEREBELLUM_DN',
+  'LEE_AGING_CEREBELLUM_UP',
+  'LEE_AGING_MUSCLE_DN',
+  'LEE_AGING_MUSCLE_UP',
+  'LEE_AGING_NEOCORTEX_DN',
+  'LEE_AGING_NEOCORTEX_UP',
+  'LU_AGING_BRAIN_DN',
+  'LU_AGING_BRAIN_UP',
+  'LY_AGING_MIDDLE_DN',
+  'LY_AGING_MIDDLE_UP',
+  'LY_AGING_OLD_DN',
+  'LY_AGING_OLD_UP',
+  'LY_AGING_PREMATURE_DN',
+  'RODWELL_AGING_KIDNEY_DN',
+  'RODWELL_AGING_KIDNEY_NO_BLOOD_DN',
+  'RODWELL_AGING_KIDNEY_NO_BLOOD_UP',
+  'RODWELL_AGING_KIDNEY_UP',
+  'VISALA_AGING_LYMPHOCYTE_DN',
+  'VISALA_AGING_LYMPHOCYTE_UP',
+  'VISALA_RESPONSE_TO_HEAT_SHOCK_AND_AGING_DN',
+  'VISALA_RESPONSE_TO_HEAT_SHOCK_AND_AGING_UP',
+  'WP_CALORIC_RESTRICTION_AND_AGING',
+  'WP_NAD_METABOLISM_SIRTUINS_AND_AGING',
+  'ONSHIP_TO_DIETARY_RESTRICTION_AND_AGING'
 )
-base::names(mysets_all) <- mysets_names_all
+mysets_aging <- purrr::map(
+  .x = mysets_names_aging,
+  .f = function(x = mysets_names_aging){gsdb %>% dplyr::filter(gs_name == x) %>% dplyr::pull(entrez_gene)}
+)
+base::names(mysets_aging) <- mysets_names_aging
 
-gsea_res_all_aging <- fgsea::fgsea(
-  pathways = mysets_all, 
+gsea_res_aging_aging <- fgsea::fgsea(
+  pathways = mysets_aging, 
   stats    = de_comb %>% dplyr::select(EntrezID, stat_aging) %>% dplyr::pull(name = EntrezID),
   minSize  = 15,
   maxSize  = 500
 )
 
-gsea_res_all_trf <- fgsea::fgsea(
-  pathways = mysets_all, 
+gsea_res_aging_trf <- fgsea::fgsea(
+  pathways = mysets_aging, 
   stats    = de_comb %>% dplyr::select(EntrezID, stat_trf) %>% dplyr::pull(name = EntrezID),
   minSize  = 15,
   maxSize  = 500
 )
 
-readr::write_csv(x = gsea_res_all_aging, file = './data/de_genes_GSEA/gsea_res_all_aging.csv')
-readr::write_csv(x = gsea_res_all_trf, file = './data/de_genes_GSEA/gsea_res_all_trf.csv')
+readr::write_csv(x = gsea_res_aging_aging, file = './data/de_genes_GSEA/gsea_res_aging_aging.csv')
+readr::write_csv(x = gsea_res_aging_trf, file = './data/de_genes_GSEA/gsea_res_aging_trf.csv')
+
+
+
+
+##===================================================================================================================
 
 
 ## GSVA
